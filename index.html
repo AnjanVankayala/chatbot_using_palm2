@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Push Notification Service</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3350;
+    --text: #e2e4ef;
+    --muted: #7b7f99;
+    --accent: #6c63ff;
+    --accent-dim: #3d3980;
+    --green: #22c55e;
+    --red: #ef4444;
+    --amber: #f59e0b;
+    --radius: 10px;
+    --font: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    padding: 24px 16px 48px;
+  }
+
+  .page { max-width: 900px; margin: 0 auto; }
+
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 32px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+  .card h2 { font-size: 13px; font-weight: 600; text-transform: uppercase;
+             letter-spacing: .06em; color: var(--muted); margin-bottom: 14px; }
+
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; margin-top: 12px; }
+  label:first-of-type { margin-top: 0; }
+
+  input[type=text], input[type=email], input[type=url], textarea {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 13px;
+    outline: none; transition: border-color .15s;
+  }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 64px; font-family: var(--font); }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 500;
+    border: none; cursor: pointer; transition: opacity .15s, background .15s;
+  }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #7c74ff; }
+  .btn-danger  { background: #3b1a1a; color: var(--red); border: 1px solid #6b2a2a; }
+  .btn-danger:hover:not(:disabled)  { background: #4a2020; }
+  .btn-ghost   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover:not(:disabled)   { background: var(--border); }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 6px; background: var(--muted);
+  }
+  .status-dot.green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.red    { background: var(--red); }
+  .status-dot.amber  { background: var(--amber); }
+
+  .status-line { font-size: 13px; display: flex; align-items: center; margin-bottom: 8px; }
+  .status-text { color: var(--muted); }
+
+  .log {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    font-family: var(--font); font-size: 11px; line-height: 1.6;
+    padding: 10px 12px; height: 200px; overflow-y: auto;
+    grid-column: 1 / -1;
+  }
+  .log-entry { padding: 1px 0; }
+  .log-entry.ok   { color: var(--green); }
+  .log-entry.err  { color: var(--red); }
+  .log-entry.warn { color: var(--amber); }
+  .log-entry.info { color: var(--muted); }
+
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+  }
+  .tag-active { background: #142b1f; color: var(--green); }
+  .tag-inactive { background: #2b1414; color: var(--red); }
+
+  pre.json {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    font-family: var(--font); font-size: 11px; padding: 10px; overflow-x: auto;
+    white-space: pre-wrap; word-break: break-all; margin-top: 10px;
+  }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Push Notification Service</h1>
+  <p class="subtitle">Subscribe your browser and send push notifications via VAPID / Web Push Protocol</p>
+
+  <div class="grid">
+
+    <!-- ── Card 1: Service Worker + Subscription Status ── -->
+    <div class="card">
+      <h2>Status</h2>
+
+      <div class="status-line">
+        <span class="status-dot" id="sw-dot"></span>
+        <span class="status-text" id="sw-status">Checking service worker…</span>
+      </div>
+      <div class="status-line">
+        <span class="status-dot" id="perm-dot"></span>
+        <span class="status-text" id="perm-status">Notification permission: checking…</span>
+      </div>
+      <div class="status-line">
+        <span class="status-dot" id="sub-dot"></span>
+        <span class="status-text" id="sub-status">Subscription: not checked</span>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-subscribe" disabled onclick="doSubscribe()">Subscribe</button>
+        <button class="btn btn-danger"  id="btn-unsub"    disabled onclick="doUnsubscribe()">Unsubscribe</button>
+        <button class="btn btn-ghost"                              onclick="checkStatus()">Refresh status</button>
+      </div>
+    </div>
+
+    <!-- ── Card 2: Config ── -->
+    <div class="card">
+      <h2>Configuration</h2>
+      <label>API base URL</label>
+      <input type="url" id="api-url" value="http://localhost:8000" oninput="saveConfig()">
+
+      <label>Bearer token</label>
+      <input type="text" id="bearer" placeholder="dev-token" oninput="saveConfig()">
+
+      <label>Your email (used as user_id)</label>
+      <input type="email" id="user-email" placeholder="you@example.com" oninput="saveConfig()">
+
+      <label>Topics to subscribe (comma-separated)</label>
+      <input type="text" id="topics" value="alerts,updates" oninput="saveConfig()">
+    </div>
+
+    <!-- ── Card 3: Send notification ── -->
+    <div class="card">
+      <h2>Publish notification</h2>
+
+      <label>Target type</label>
+      <select id="target-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;">
+        <option value="topic">Topic</option>
+        <option value="user">Single user (email)</option>
+      </select>
+
+      <label>Target value</label>
+      <input type="text" id="target-value" placeholder="alerts">
+
+      <label>Title</label>
+      <input type="text" id="notif-title" value="Test notification">
+
+      <label>Body</label>
+      <input type="text" id="notif-body" value="This is a test push notification.">
+
+      <label>Action URL (opens on click)</label>
+      <input type="text" id="notif-url" value="/">
+
+      <label>Idempotency key (leave blank to auto-generate)</label>
+      <input type="text" id="idem-key" placeholder="auto">
+
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="doPublish()">Send notification</button>
+      </div>
+    </div>
+
+    <!-- ── Card 4: Poll status ── -->
+    <div class="card">
+      <h2>Delivery status</h2>
+
+      <label>Event ID</label>
+      <input type="text" id="poll-event-id" placeholder="paste event_id from publish response">
+
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="doPollStatus()">Poll status</button>
+      </div>
+
+      <pre class="json" id="status-output">—</pre>
+    </div>
+
+    <!-- ── Activity log (full width) ── -->
+    <div class="log" id="activity-log">
+      <div class="log-entry info">[ready] Push Notification Service UI loaded</div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ─── Config persistence ───────────────────────────────────────────────────────
+const CONFIG_KEY = 'push_service_config';
+
+function loadConfig() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
+    if (c.apiUrl)     document.getElementById('api-url').value     = c.apiUrl;
+    if (c.bearer)     document.getElementById('bearer').value      = c.bearer;
+    if (c.userEmail)  document.getElementById('user-email').value  = c.userEmail;
+    if (c.topics)     document.getElementById('topics').value      = c.topics;
+  } catch {}
+}
+
+function saveConfig() {
+  localStorage.setItem(CONFIG_KEY, JSON.stringify({
+    apiUrl:    document.getElementById('api-url').value,
+    bearer:    document.getElementById('bearer').value,
+    userEmail: document.getElementById('user-email').value,
+    topics:    document.getElementById('topics').value,
+  }));
+}
+
+function cfg() {
+  return {
+    apiUrl: document.getElementById('api-url').value.replace(/\/$/, ''),
+    bearer: document.getElementById('bearer').value || 'dev-token',
+    email:  document.getElementById('user-email').value,
+    topics: document.getElementById('topics').value.split(',').map(t => t.trim()).filter(Boolean),
+  };
+}
+
+// ─── Logging ──────────────────────────────────────────────────────────────────
+function log(msg, level = 'info') {
+  const el = document.getElementById('activity-log');
+  const ts  = new Date().toTimeString().slice(0, 8);
+  const div = document.createElement('div');
+  div.className = `log-entry ${level}`;
+  div.textContent = `[${ts}] ${msg}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  console.log(`[${level}] ${msg}`);
+}
+
+// ─── Status dots ─────────────────────────────────────────────────────────────
+function setDot(id, color, text, textId) {
+  document.getElementById(id).className = `status-dot ${color}`;
+  if (textId) document.getElementById(textId).textContent = text;
+}
+
+// ─── VAPID key + SW init ──────────────────────────────────────────────────────
+let swRegistration = null;
+let vapidPublicKey = null;
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw     = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+async function init() {
+  loadConfig();
+
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    log('Browser does not support push notifications', 'err');
+    setDot('sw-dot', 'red', 'Push API not supported in this browser', 'sw-status');
+    return;
+  }
+
+  // Register service worker
+  try {
+    swRegistration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    setDot('sw-dot', 'green', 'Service worker active', 'sw-status');
+    log('Service worker registered and active', 'ok');
+  } catch (err) {
+    setDot('sw-dot', 'red', `Service worker failed: ${err.message}`, 'sw-status');
+    log(`Service worker error: ${err.message}`, 'err');
+    return;
+  }
+
+  // Check notification permission
+  const perm = Notification.permission;
+  updatePermDot(perm);
+
+  // Fetch VAPID public key
+  try {
+    const res  = await fetch(`${cfg().apiUrl}/v1/vapid-key`);
+    const data = await res.json();
+    vapidPublicKey = data.public_key;
+    log('VAPID public key fetched from server', 'ok');
+  } catch (err) {
+    log(`Could not fetch VAPID key: ${err.message}`, 'warn');
+  }
+
+  await checkStatus();
+}
+
+function updatePermDot(perm) {
+  if (perm === 'granted') {
+    setDot('perm-dot', 'green', 'Notification permission: granted', 'perm-status');
+    document.getElementById('btn-subscribe').disabled = false;
+  } else if (perm === 'denied') {
+    setDot('perm-dot', 'red', 'Notification permission: denied (reset in browser settings)', 'perm-status');
+  } else {
+    setDot('perm-dot', 'amber', 'Notification permission: not yet requested', 'perm-status');
+    document.getElementById('btn-subscribe').disabled = false;
+  }
+}
+
+async function checkStatus() {
+  if (!swRegistration) return;
+  const sub = await swRegistration.pushManager.getSubscription();
+  if (sub) {
+    setDot('sub-dot', 'green', 'Subscribed (browser has active push subscription)', 'sub-status');
+    document.getElementById('btn-unsub').disabled = false;
+  } else {
+    setDot('sub-dot', 'amber', 'Not subscribed', 'sub-status');
+    document.getElementById('btn-unsub').disabled = true;
+  }
+}
+
+// ─── Subscribe ────────────────────────────────────────────────────────────────
+async function doSubscribe() {
+  const c = cfg();
+
+  if (!c.email) {
+    log('Enter your email address first', 'err');
+    return;
+  }
+
+  // Request permission if not granted
+  if (Notification.permission !== 'granted') {
+    log('Requesting notification permission…', 'info');
+    const perm = await Notification.requestPermission();
+    updatePermDot(perm);
+    if (perm !== 'granted') {
+      log('Permission denied — cannot subscribe', 'err');
+      return;
+    }
+  }
+
+  // Fetch VAPID key if not yet loaded
+  if (!vapidPublicKey) {
+    try {
+      const res  = await fetch(`${c.apiUrl}/v1/vapid-key`);
+      const data = await res.json();
+      vapidPublicKey = data.public_key;
+    } catch (err) {
+      log(`Cannot fetch VAPID key: ${err.message}`, 'err');
+      return;
+    }
+  }
+
+  // Remove old subscription first (clean re-subscribe)
+  const existingSub = await swRegistration.pushManager.getSubscription();
+  if (existingSub) {
+    await existingSub.unsubscribe();
+    log('Old subscription removed', 'info');
+  }
+
+  // Create new browser push subscription
+  let subscription;
+  try {
+    subscription = await swRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+    log('Browser push subscription created', 'ok');
+  } catch (err) {
+    log(`Push subscribe failed: ${err.message}`, 'err');
+    return;
+  }
+
+  // Register with our server
+  try {
+    const res = await fetch(`${c.apiUrl}/v1/subscribe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${c.bearer}`,
+      },
+      body: JSON.stringify({
+        user_id: c.email,
+        subscription: subscription.toJSON(),
+        topics: c.topics,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+
+    log(`Subscribed! subscription_id=${data.subscription_id} topics=[${data.topics}]`, 'ok');
+    await checkStatus();
+  } catch (err) {
+    log(`Server registration failed: ${err.message}`, 'err');
+  }
+}
+
+// ─── Unsubscribe ──────────────────────────────────────────────────────────────
+async function doUnsubscribe() {
+  const c = cfg();
+  if (!c.email) { log('Enter your email first', 'err'); return; }
+
+  const sub = await swRegistration.pushManager.getSubscription();
+  if (!sub) { log('No active subscription found', 'warn'); return; }
+
+  const endpoint = sub.endpoint;
+
+  // Unsubscribe from browser
+  await sub.unsubscribe();
+  log('Browser subscription removed', 'ok');
+
+  // Tell the server
+  try {
+    const res = await fetch(`${c.apiUrl}/v1/unsubscribe`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${c.bearer}`,
+      },
+      body: JSON.stringify({ user_id: c.email, endpoint }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+    log('Server subscription record removed', 'ok');
+  } catch (err) {
+    log(`Server unsubscribe failed: ${err.message}`, 'warn');
+  }
+
+  await checkStatus();
+}
+
+// ─── Publish ──────────────────────────────────────────────────────────────────
+async function doPublish() {
+  const c = cfg();
+
+  const targetType  = document.getElementById('target-type').value;
+  const targetValue = document.getElementById('target-value').value || (targetType === 'topic' ? 'alerts' : c.email);
+  const title       = document.getElementById('notif-title').value  || 'Test';
+  const body        = document.getElementById('notif-body').value;
+  const url         = document.getElementById('notif-url').value    || '/';
+  const idemKey     = document.getElementById('idem-key').value     || `test_${Date.now()}`;
+
+  try {
+    const res = await fetch(`${c.apiUrl}/v1/publish`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${c.bearer}`,
+      },
+      body: JSON.stringify({
+        target: { type: targetType, value: targetValue },
+        notification: { title, body, data: { url } },
+        options: { ttl: 3600, urgency: 'normal' },
+        idempotency_key: idemKey,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+
+    log(`Queued! event_id=${data.event_id} targets=${data.target_count} status=${data.status}`, 'ok');
+    document.getElementById('poll-event-id').value = data.event_id;
+  } catch (err) {
+    log(`Publish failed: ${err.message}`, 'err');
+  }
+}
+
+// ─── Poll status ──────────────────────────────────────────────────────────────
+async function doPollStatus() {
+  const c = cfg();
+  const eventId = document.getElementById('poll-event-id').value.trim();
+  if (!eventId) { log('Enter an event_id to poll', 'warn'); return; }
+
+  try {
+    const res  = await fetch(`${c.apiUrl}/v1/status/${eventId}`, {
+      headers: { 'Authorization': `Bearer ${c.bearer}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+
+    document.getElementById('status-output').textContent = JSON.stringify(data, null, 2);
+    log(`Status: ${data.status} — delivered=${data.summary.delivered} failed=${data.summary.failed} pending=${data.summary.pending}`, 'ok');
+  } catch (err) {
+    log(`Status poll failed: ${err.message}`, 'err');
+    document.getElementById('status-output').textContent = err.message;
+  }
+}
+
+// ─── Receive messages from service worker ────────────────────────────────────
+navigator.serviceWorker?.addEventListener('message', event => {
+  const msg = event.data;
+  if (msg?.type === 'PUSH_RECEIVED') {
+    log(`Push received in tab: "${msg.title}" — ${msg.body}`, 'ok');
+  }
+  if (msg?.type === 'SUBSCRIPTION_CHANGED') {
+    log('Subscription changed by browser — re-subscribing…', 'warn');
+    doSubscribe();
+  }
+});
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
